@@ -15,8 +15,8 @@
   // Publish to GitHub Releases — electron-updater reads latest.yml from here
   "publish": {
     "provider": "github",
-    "owner": "YOUR_GITHUB_USERNAME",
-    "repo": "qevra-ai"
+    "owner": "ingointo",
+    "repo": "Qevra-AI"
   },
   "mac": {
     "target": ["dmg"],
