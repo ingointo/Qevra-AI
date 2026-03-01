@@ -1,0 +1,47 @@
+// @see - https://www.electron.build/configuration/configuration
+{
+  "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+  "appId": "ai.qevra.app",
+  "asar": true,
+  "productName": "Qevra AI",
+  "icon": "public/icon.png",
+  "directories": {
+    "output": "release/${version}"
+  },
+  "files": [
+    "dist",
+    "dist-electron"
+  ],
+  // Publish to GitHub Releases — electron-updater reads latest.yml from here
+  "publish": {
+    "provider": "github",
+    "owner": "YOUR_GITHUB_USERNAME",
+    "repo": "qevra-ai"
+  },
+  "mac": {
+    "target": ["dmg"],
+    "icon": "public/icon.png",
+    "artifactName": "${productName}-Mac-${version}.${ext}"
+  },
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "public/icon.png",
+    "artifactName": "${productName}-Windows-${version}-Setup.${ext}"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "deleteAppDataOnUninstall": false
+  },
+  "linux": {
+    "target": ["AppImage"],
+    "icon": "public/icon.png",
+    "artifactName": "${productName}-Linux-${version}.${ext}"
+  }
+}
