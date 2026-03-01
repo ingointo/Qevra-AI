@@ -35,13 +35,13 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      # Windows: set CI=true to prevent interactive prompts during electron install
+      # Windows: CI=true prevents interactive prompts during electron binary install
       - name: Install dependencies (Windows)
         if: matrix.os == 'windows-latest'
-        run: npm ci --ignore-scripts && npx electron --version
+        run: npm ci
         env:
           CI: true
-          npm_config_yes: true
+          ELECTRON_GET_USE_PROXY: false
 
       - name: Install dependencies (Mac/Linux)
         if: matrix.os != 'windows-latest'
