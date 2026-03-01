@@ -1,6 +1,8 @@
 {
   "name": "qevra-ai",
   "productName": "Qevra AI",
+  "description": "AI-powered university class automation — auto-joins Teams meetings",
+  "author": "ingointo",
   "private": true,
   "version": "1.0.0",
   "scripts": {

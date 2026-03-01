@@ -3,15 +3,16 @@ name: Build & Release Qevra AI
 on:
   push:
     tags:
-      - 'v*'          # Trigger on version tags like v1.0.0, v1.2.3
-  workflow_dispatch:   # Allow manual trigger from GitHub UI
+      - 'v*'
+  workflow_dispatch:
 
 permissions:
-  contents: write      # Required to create GitHub Releases
+  contents: write
 
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: macos-latest
@@ -22,6 +23,7 @@ jobs:
             platform: linux
 
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
@@ -33,11 +35,21 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Install dependencies
+      # Windows: set CI=true to prevent interactive prompts during electron install
+      - name: Install dependencies (Windows)
+        if: matrix.os == 'windows-latest'
+        run: npm ci --ignore-scripts && npx electron --version
+        env:
+          CI: true
+          npm_config_yes: true
+
+      - name: Install dependencies (Mac/Linux)
+        if: matrix.os != 'windows-latest'
         run: npm ci
 
-      - name: Install Playwright browsers
-        run: npx playwright install chromium
+      - name: Skip Playwright browser download in CI
+        run: npx playwright install chromium --with-deps
+        if: matrix.os == 'ubuntu-latest'
 
       - name: Lint
         run: npm run lint
@@ -45,11 +57,11 @@ jobs:
       - name: Build app
         run: npm run build
         env:
-          # macOS code signing (optional — leave empty to skip signing)
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          # Disable code signing — avoids "not a file" error when no cert is set
+          CSC_IDENTITY_AUTO_DISCOVERY: false
 
-      - name: Upload artifacts
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: qevra-ai-${{ matrix.platform }}
@@ -57,9 +69,10 @@ jobs:
             release/**/*.dmg
             release/**/*.exe
             release/**/*.AppImage
+          if-no-files-found: warn
           retention-days: 7
 
-      - name: Create GitHub Release
+      - name: Publish to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
@@ -68,5 +81,4 @@ jobs:
             release/**/*.exe
             release/**/*.AppImage
           generate_release_notes: true
-          draft: false
-          prerelease: false
+          token: ${{ secrets.GH_TOKEN }}
