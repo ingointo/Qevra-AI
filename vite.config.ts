@@ -13,7 +13,7 @@ export default defineConfig({
         vite: {
           build: {
             rollupOptions: {
-              external: ['electron', 'playwright', 'chromium-bidi', 'electron-store']
+              external: ['electron', 'playwright-core', 'chromium-bidi', 'electron-store']
             },
             outDir: 'dist-electron'
           }

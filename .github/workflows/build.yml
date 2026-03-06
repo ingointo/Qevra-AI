@@ -47,10 +47,6 @@ jobs:
         if: matrix.os != 'windows-latest'
         run: npm ci
 
-      - name: Skip Playwright browser download in CI
-        run: npx playwright install chromium --with-deps
-        if: matrix.os == 'ubuntu-latest'
-
       - name: Lint
         run: npm run lint
 

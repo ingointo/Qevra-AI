@@ -1,4 +1,4 @@
-import type { Browser, BrowserContext } from 'playwright';
+import type { Browser, BrowserContext } from 'playwright-core';
 
 export interface ClassSchedule {
     subject: string;
@@ -32,7 +32,7 @@ export class PortalAutomator {
         return d;
     }
 
-    private async dismissReferralPopup(page: import('playwright').Page) {
+    private async dismissReferralPopup(page: import('playwright-core').Page) {
         this.onLog('Checking for referral popup...');
         // Wait for popup to appear after page loads
         await page.waitForTimeout(3000);
@@ -109,7 +109,7 @@ export class PortalAutomator {
         } catch (e) { /* ignore */ }
     }
 
-    private async scrapeSchedule(page: import('playwright').Page): Promise<ClassSchedule[]> {
+    private async scrapeSchedule(page: import('playwright-core').Page): Promise<ClassSchedule[]> {
         // Scroll down to load the schedule table
         await page.mouse.wheel(0, 600);
         await page.waitForTimeout(2000);
@@ -215,9 +215,9 @@ export class PortalAutomator {
         this.isRunning = true;
         try {
             this.onLog('Launching automation browser...');
-            const { chromium } = await import('playwright');
+            const { chromium } = await import('playwright-core');
 
-            this.browser = await chromium.launch({
+            const launchOptions = {
                 headless: false,
                 args: [
                     '--use-fake-ui-for-media-stream',
@@ -229,7 +229,15 @@ export class PortalAutomator {
                     '--no-first-run',
                     '--disable-features=msTeamsDesktopAppIntegration'
                 ]
-            });
+            };
+
+            try {
+                this.onLog('Attempting to launch Google Chrome...');
+                this.browser = await chromium.launch({ ...launchOptions, channel: 'chrome' });
+            } catch (e) {
+                this.onLog('Chrome not found. Attempting to launch Microsoft Edge...');
+                this.browser = await chromium.launch({ ...launchOptions, channel: 'msedge' });
+            }
 
             this.context = await this.browser.newContext({
                 permissions: ['camera', 'microphone'],
@@ -350,7 +358,7 @@ export class PortalAutomator {
         }
     }
 
-    private async joinClass(page: import('playwright').Page, cls: ClassSchedule, studentId: string) {
+    private async joinClass(page: import('playwright-core').Page, cls: ClassSchedule, studentId: string) {
         this.onLog(`Joining: "${cls.subject}" (${cls.startTime} – ${cls.endTime})`);
 
         // ── Transform URL to Teams v2 web format ──────────────────────────────
