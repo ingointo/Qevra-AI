@@ -398,6 +398,46 @@ export class PortalAutomator {
         await page.waitForTimeout(3000); // wait for Teams to load and possibly redirect
 
         if (isTeams) {
+            // ── Step -1: FORCE BLOCK VIDEO STREAM AT BROWSER LEVEL ───────────────
+            // Even if the university forces video on or the toggle button fails to click,
+            // we will hijack the browser's webcam API and feed it a literal empty black screen.
+            this.onLog('Hijacking camera feed to force a black screen...');
+            await page.addInitScript(() => {
+                // Intercept getUserMedia
+                const originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+                navigator.mediaDevices.getUserMedia = async (constraints) => {
+                    // If video is requested, intercept and return a blank canvas stream
+                    if (constraints && constraints.video) {
+                        try {
+                            const canvas = document.createElement('canvas');
+                            canvas.width = 640;
+                            canvas.height = 480;
+                            const ctx = canvas.getContext('2d');
+                            if (ctx) {
+                                ctx.fillStyle = 'black';
+                                ctx.fillRect(0, 0, 640, 480);
+                                ctx.fillStyle = 'white';
+                                ctx.font = '20px Arial';
+                                // ctx.fillText('CAMERA DISABLED BY AUTOHAND', 50, 240);
+                            }
+
+                            // 1 fps is enough to satisfy the stream requirements
+                            const stream = canvas.captureStream(1);
+
+                            // If they also requested audio, fetch just the audio track
+                            if (constraints.audio) {
+                                const audioStream = await originalGetUserMedia({ audio: constraints.audio });
+                                stream.addTrack(audioStream.getAudioTracks()[0]);
+                            }
+                            return stream;
+                        } catch (e) {
+                            return originalGetUserMedia(constraints);
+                        }
+                    }
+                    return originalGetUserMedia(constraints);
+                };
+            });
+
             // ── Step 0: Force-remove the "Open Microsoft Teams?" overlay ─────────
             // This overlay is an HTML element Teams renders over the page.
             // We forcibly hide it via JS rather than clicking Cancel, which is unreliable.
@@ -457,26 +497,46 @@ export class PortalAutomator {
 
             // ── Step 3: Turn off camera & mic ─────────────────────────────────
             this.onLog('Turning off camera and microphone...');
-            // Click camera/mic toggle buttons that are currently ON
-            await page.evaluate(() => {
-                // Targets: aria switches, checkboxes, and Teams-specific video/audio buttons
-                const selectors = [
-                    '[data-tid="toggle-video"]',
-                    '[data-tid="toggle-mute"]',
-                    '[aria-label*="camera" i]',
-                    '[aria-label*="microphone" i]',
-                    '[aria-label*="video" i]',
-                    '[role="switch"][aria-checked="true"]',
-                ];
-                for (const sel of selectors) {
-                    document.querySelectorAll(sel).forEach(el => {
-                        const checked = el.getAttribute('aria-checked') || el.getAttribute('aria-pressed') || '';
-                        // Only click if currently ON (checked=true or pressed=true)
-                        if (checked !== 'false' && el instanceof HTMLElement) el.click();
-                    });
+
+            // Wait a moment for Teams to finish rendering the toggles
+            await page.waitForTimeout(3000);
+
+            // Attempt to toggle up to 5 times using the exact HTML DOM provided by the user.
+            for (let i = 0; i < 5; i++) {
+                const toggled = await page.evaluate(() => {
+                    let clickedSomething = false;
+
+                    // 1. Target exact data-tid switches first (from the user's DOM snapshot)
+                    const exactSwitches = document.querySelectorAll('input[data-tid="toggle-video"], input[data-tid="toggle-mute"]');
+                    for (const el of Array.from(exactSwitches)) {
+                        const inputState = el as HTMLInputElement;
+                        if (inputState.checked) {
+                            inputState.click();
+                            clickedSomething = true;
+                        }
+                    }
+
+                    // 2. Fallback to generic switch inputs if exact data-tids aren't found
+                    const switchInputs = document.querySelectorAll('input[role="switch"][type="checkbox"]');
+                    for (const input of Array.from(switchInputs)) {
+                        const el = input as HTMLInputElement;
+                        const title = (el.getAttribute('title') || '').toLowerCase();
+
+                        // "Turn camera off", "Mic", etc.
+                        if (el.checked && (title.includes('camera') || title.includes('mic') || title.includes('video') || title.includes('audio'))) {
+                            el.click();
+                            clickedSomething = true;
+                        }
+                    }
+
+                    return clickedSomething;
+                });
+
+                if (!toggled) {
+                    break;
                 }
-            });
-            await page.waitForTimeout(1000);
+                await page.waitForTimeout(3000);
+            }
 
             // ── Step 4: Enter student ID ──────────────────────────────────────
             // Wait for Teams to redirect to the light-meetings/launch pre-join page
@@ -486,40 +546,82 @@ export class PortalAutomator {
             } catch (_) {
                 this.onLog('Still on same page — proceeding.');
             }
+            // Increase timeout significantly to allow heavy JS execution to finish
+            await page.waitForTimeout(3000);
 
-            // Use Playwright fill() — works with React inputs (not raw DOM .value)
-            const nameInput = page.locator([
-                'input[placeholder*="name" i]',
-                'input[placeholder*="Type your name" i]',
-                'input[data-tid="prejoin-display-name-input"]',
-                'input[type="text"]',
-            ].join(', ')).first();
+            this.onLog(`Locating name input field for: ${studentId}`);
+            let typedName = false;
 
-            const nameVisible = await nameInput.isVisible({ timeout: 6000 }).catch(() => false);
-            if (nameVisible) {
-                this.onLog(`Entering student ID: ${studentId}`);
+            // Target the input directly based on the placeholder seen in the image
+            const nameInput = page.locator('input[placeholder="Type your name"]').first();
+
+            if (await nameInput.isVisible().catch(() => false)) {
                 await nameInput.click();
-                await nameInput.selectText().catch(() => { });
+                await page.waitForTimeout(200);
                 await nameInput.fill(studentId);
-                await page.waitForTimeout(600);
+                await page.keyboard.press('Tab'); // Trigger react onChange event to enable the button
+                typedName = true;
                 this.onLog('Student ID entered successfully.');
             } else {
-                this.onLog('Name input not found — may already be in meeting.');
+                // Fallback aggressive method
+                for (let i = 0; i < 3; i++) {
+                    typedName = await page.evaluate((id) => {
+                        const inputs = Array.from(document.querySelectorAll('input[type="text"]')) as HTMLInputElement[];
+                        const nameBox = inputs.find(el => el.placeholder.toLowerCase().includes('name'));
+                        if (nameBox) {
+                            nameBox.focus();
+                            nameBox.value = id;
+                            nameBox.dispatchEvent(new Event('input', { bubbles: true }));
+                            nameBox.dispatchEvent(new Event('change', { bubbles: true }));
+                            nameBox.blur();
+                            return true;
+                        }
+                        return false;
+                    }, studentId);
+
+                    if (typedName) {
+                        this.onLog('Student ID entered via fallback method.');
+                        break;
+                    }
+                    await page.waitForTimeout(1000);
+                }
+            }
+
+            if (!typedName) {
+                this.onLog('[WARNING] Name input not found — it might already be saved or we bypassed the pre-join screen entirely.');
             }
 
             // ── Step 5: Click "Join now" ──────────────────────────────────────
-            const joinBtn = page.locator([
-                'button[data-tid="prejoin-join-button"]',
-                ':text-is("Join now")',
-                ':text-is("Join")',
-                'button[aria-label*="Join" i]',
-            ].join(', ')).first();
+            await page.waitForTimeout(1000); // Wait for the "Join now" button to enable after the name is typed
 
-            if (await joinBtn.isVisible({ timeout: 8000 }).catch(() => false)) {
-                await joinBtn.click();
-                this.onLog('Clicked "Join now" — attending class!');
-            } else {
-                this.onLog('Join button not found. May already be in the meeting.');
+            let clickedJoin = false;
+            // Iterate up to 10 seconds checking if a button labeled "Join" becomes clickable
+            for (let i = 0; i < 10; i++) {
+                clickedJoin = await page.evaluate(() => {
+                    const btns = Array.from(document.querySelectorAll('button'));
+                    // Find a button containing the word "Join" that is NOT disabled and NOT aria-disabled
+                    const joinBtn = btns.find(b =>
+                        b.innerText.toLowerCase().includes('join') &&
+                        !b.disabled &&
+                        b.getAttribute('aria-disabled') !== 'true'
+                    );
+                    if (joinBtn) {
+                        joinBtn.click();
+                        return true;
+                    }
+                    return false;
+                });
+
+                if (clickedJoin) {
+                    this.onLog('Clicked "Join now" — attending class!');
+                    break;
+                }
+
+                await page.waitForTimeout(1000);
+            }
+
+            if (!clickedJoin) {
+                this.onLog('[WARNING] "Join now" button not found or it remained disabled.');
             }
         } else {
             this.onLog('Non-Teams link opened. Attending...');
