@@ -23,15 +23,12 @@ export class BaseAutomator {
     const launchOptions = {
       headless: false,
       args: [
-        // Core functionality
         '--use-fake-ui-for-media-stream',
         '--use-fake-device-for-media-stream',
         '--disable-notifications',
-        '--disable-features=ExternalProtocolDialog',
-        '--no-default-browser-check',
-        '--no-first-run',
+        // Prevent the "Open Microsoft Teams?" OS-level protocol dialog
         '--disable-features=msTeamsDesktopAppIntegration',
-        
+
         // Low bandwidth / Network stability optimizations
         '--disable-background-networking',
         '--disable-background-timer-throttling',
@@ -63,6 +60,10 @@ export class BaseAutomator {
         '--password-store=basic',
         '--use-gl=swiftshader',
         '--use-mock-keychain',
+        '--disable-features=ExternalProtocolDialog',
+        '--no-default-browser-check',
+        '--no-first-run',
+        '--disable-features=msTeamsDesktopAppIntegration'
       ]
     };
 

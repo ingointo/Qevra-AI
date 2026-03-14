@@ -20,20 +20,25 @@ export class NavigationHelper {
 
     await this.retryHandler.retry(async () => {
       try {
-        await page.goto(url, {
+        const response = await page.goto(url, {
           timeout,
           waitUntil: 'domcontentloaded',
         });
+
+        if (response && response.status() >= 400) {
+          this.logger.warn(category, `Received HTTP ${response.status()} for ${url}`);
+        }
         
-        // Wait for network to be idle or at least commit
-        await page.waitForLoadState('load', { timeout: 30000 }).catch(() => {
-          this.logger.warn(category, `Load state 'load' timed out for ${url}, continuing anyway...`);
+        // Wait for 'load' with a generous timeout but don't fail if it's just slow
+        await page.waitForLoadState('load', { timeout: Math.min(timeout, 30000) }).catch(() => {
+          this.logger.warn(category, `Page 'load' state delayed for ${url}, continuing based on DOM...`);
         });
 
         this.logger.success(category, `Successfully reached: ${url}`);
       } catch (error: unknown) {
-        if (error instanceof Error && error.message.includes('net::ERR_ABORTED')) {
-          this.logger.warn(category, `Navigation aborted for ${url}, likely a redirect or background load.`);
+        const msg = error instanceof Error ? error.message : String(error);
+        if (msg.includes('net::ERR_ABORTED') || msg.includes('NS_BINDING_ABORTED')) {
+          this.logger.warn(category, `Navigation aborted/redirected for ${url}.`);
           return;
         }
         throw error;
@@ -41,7 +46,21 @@ export class NavigationHelper {
     }, {
       maxAttempts: 5,
       category,
-      initialDelayMs: 2000,
+      initialDelayMs: 3000,
+    });
+  }
+
+  /**
+   * Adaptive wait for a specific condition or state.
+   */
+  public async waitForState(page: Page, predicate: () => boolean | Promise<boolean>, timeout: number = 30000): Promise<void> {
+    const category = 'STATE_WAIT';
+    await this.retryHandler.retry(async () => {
+      await page.waitForFunction(predicate, { timeout });
+    }, {
+      maxAttempts: 2,
+      category,
+      initialDelayMs: 1000,
     });
   }
 

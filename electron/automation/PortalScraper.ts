@@ -17,158 +17,170 @@ export class PortalScraper {
 
   public async login(page: Page, username: string, password: string): Promise<void> {
     const category = 'LOGIN';
-    await this.navigation.goto(page, 'https://sutech.univlms.com/signin/index?redirect=/');
+    this.logger.info(category, 'Navigating to university portal...');
+    
+    await this.navigation.goto(page, 'https://sutech.univlms.com/signin/index?redirect=/', 60000);
 
     await this.retryHandler.retry(async () => {
-      this.logger.info(category, 'Attempting login...');
-      
-      const usernameField = page.locator('input[name="username"], #username, input[type="text"]').first();
-      await usernameField.waitFor({ state: 'visible', timeout: 10000 });
-      await usernameField.fill(username);
-
-      const passField = page.locator('input[type="password"]').first();
-      await passField.fill(password);
-      
-      await page.keyboard.press('Enter');
-
-      // Wait for navigation or dashboard-specific element
-      await Promise.race([
-        page.waitForURL('**/dashboard/**', { timeout: 20000 }),
-        page.waitForSelector('.dashboard-title, #dashboard', { timeout: 20000 })
-      ]);
-      
-      this.logger.success(category, 'Login successful.');
-    }, {
-      maxAttempts: 3,
-      category,
-    });
+        const usernameField = page.locator('input[name="username"], #username, input[type="text"]').first();
+        await usernameField.waitFor({ state: 'visible', timeout: 15000 });
+        
+        this.logger.info(category, 'Entering credentials to adaptive fields...');
+        await usernameField.fill(username);
+        const passField = page.locator('input[type="password"]').first();
+        await passField.fill(password);
+        await page.keyboard.press('Enter');
+        
+        // Adaptive wait for dashboard or error
+        await Promise.race([
+            page.waitForURL('**/dashboard/**', { timeout: 30000 }),
+            page.waitForSelector('.alert-danger, .error-message', { timeout: 30000 })
+        ]);
+        
+        if (page.url().includes('dashboard')) {
+            this.logger.success(category, 'Login successful.');
+        } else {
+            throw new Error('Login failed: Still on login page or error detected.');
+        }
+    }, { maxAttempts: 3, category });
   }
 
   public async dismissPopups(page: Page): Promise<void> {
     const category = 'POPUP';
-    this.logger.info(category, 'Checking for popups...');
+    this.logger.info(category, 'Scanning for intrusive popups...');
     
+    // Give AJAX/Modals a moment to trigger on slow networks, then poll for visibility
+    await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+
     await this.retryHandler.retry(async () => {
-      const dismissed = await page.evaluate(() => {
-        try {
-          const win = window as unknown as { 
-            jQuery?: (selector: string) => { modal: (cmd: string) => void };
-            $: (selector: string) => { modal: (cmd: string) => void };
-            bootstrap?: { Modal?: { getInstance: (el: Element) => { hide: () => void } | null } }
-          };
+        const dismissed = await page.evaluate(() => {
+            let count = 0;
+            // 1. Try semantic close buttons (Resilient to layout shifts)
+            const closeSelectors = [
+                'button[aria-label*="close"]',
+                'button.close',
+                '.modal-header .close',
+                '[data-dismiss="modal"]',
+                '[data-bs-dismiss="modal"]',
+                'button',
+                'a'
+            ];
+            
+            for (const sel of closeSelectors) {
+                const els = document.querySelectorAll(sel);
+                els.forEach(el => {
+                    const htmlEl = el as HTMLElement;
+                    const text = (htmlEl.textContent || '').trim().toLowerCase();
+                    const isVisible = htmlEl.offsetWidth > 0 || htmlEl.offsetHeight > 0;
+                    
+                    if (isVisible && (text === 'close' || text === 'dismiss' || htmlEl.getAttribute('aria-label')?.toLowerCase().includes('close'))) {
+                        htmlEl.click();
+                        count++;
+                    } else if (isVisible && sel !== 'button' && sel !== 'a') {
+                        // For specific modal close selectors, click directly if visible
+                        htmlEl.click();
+                        count++;
+                    }
+                });
+            }
 
-          // Bootstrap 3/4 jQuery API
-          const $ = win.jQuery || win.$;
-          if ($) {
-            $('.modal').modal('hide');
-            const body = document.body;
-            body.classList.remove('modal-open');
-            const backdrops = document.querySelectorAll('.modal-backdrop');
-            backdrops.forEach(b => b.remove());
-            return 'jquery';
-          }
+            // 2. Force remove via JS/CSS if buttons fail
+            const modals = document.querySelectorAll('.modal, .modal-backdrop, .modal-dialog');
+            if (modals.length > 0) {
+                modals.forEach(m => (m as HTMLElement).style.setProperty('display', 'none', 'important'));
+                document.body.classList.remove('modal-open');
+                document.body.style.overflow = 'auto';
+                count += modals.length;
+            }
+            return count > 0 ? `dismissed-${count}` : 'none';
+        });
 
-          // Bootstrap 5 native API
-          const modals = Array.from(document.querySelectorAll('.modal.show, .modal[style*="display: block"]'));
-          for (const m of modals) {
-            const bsModal = win.bootstrap?.Modal?.getInstance(m);
-            if (bsModal) bsModal.hide();
-          }
-
-          // Direct DOM: Click the × button
-          const dismissBtn = document.querySelector('[data-dismiss="modal"], [data-bs-dismiss="modal"]') as HTMLElement;
-          if (dismissBtn) { dismissBtn.click(); return 'data-dismiss'; }
-
-          // Force-remove modal elements from DOM directly
-          ['.modal', '.modal-backdrop', '.modal-dialog'].forEach(sel => {
-            Array.from(document.querySelectorAll(sel)).forEach(el => {
-              (el as HTMLElement).style.display = 'none';
-            });
-          });
-          document.body.style.overflow = 'auto';
-          document.body.classList.remove('modal-open');
-          
-          return 'dom-force';
-        } catch (e) {
-          return 'error';
-        }
-      });
-      this.logger.info(category, `Popup dismissal strategy result: ${dismissed}`);
-    }, {
-      maxAttempts: 2,
-      category,
-    });
+        this.logger.info(category, `Popup scan result: ${dismissed}`);
+    }, { maxAttempts: 2, category });
   }
 
   public async scrapeSchedule(page: Page): Promise<ClassSchedule[]> {
     const category = 'SCRAPER';
-    this.logger.info(category, 'Starting schedule detection loop...');
+    this.logger.info(category, 'Executing frame-aware schedule extraction...');
+    
+    // Ensure at least one table-like structure is present before scraping
+    try {
+        await page.waitForSelector('table, .schedule-container, tr', { timeout: 10000 });
+    } catch (e) {
+        this.logger.warn(category, 'No schedule container detected, attempting raw scrape.');
+    }
 
-    return await this.retryHandler.retry(async () => {
-      // Small scroll to trigger lazy loading if any
-      await page.mouse.wheel(0, 500);
-      await new Promise(resolve => setTimeout(resolve, 2000));
+    const allClasses: ClassSchedule[] = [];
+    const frames = page.frames();
 
-      const classes = await page.evaluate(() => {
-        const rows = Array.from(document.querySelectorAll('tr'));
-        const results: ClassSchedule[] = [];
+    for (const frame of frames) {
+        try {
+            const results = await frame.evaluate(() => {
+                const rows = Array.from(document.querySelectorAll('tr'));
+                const list: any[] = [];
+                for (const row of rows) {
+                    const text = (row.textContent || '').trim();
+                    if (/cancel/i.test(text) || text.length < 10) continue;
 
-        for (const row of rows) {
-          const text = row.textContent || '';
-          if (/cancel/i.test(text)) continue;
+                    const timeMatch = text.match(/(\d{1,2}[.:]\d{2}\s*[AP]M)\s*[-–]\s*(\d{1,2}[.:]\d{2}\s*[AP]M)/i);
+                    if (!timeMatch) continue;
 
-          const timeMatch = text.match(
-            /(\d{1,2}[.:]\d{2}\s*[AP]M)\s*[-–]\s*(\d{1,2}[.:]\d{2}\s*[AP]M)/i
-          );
-          if (!timeMatch) continue;
+                    let link = '';
+                    const anchors = row.querySelectorAll('a');
+                    for (const a of Array.from(anchors)) {
+                        const href = a.href || a.getAttribute('data-href') || '';
+                        if (href && !href.startsWith('javascript') && href !== window.location.href) {
+                            link = href;
+                            break;
+                        }
+                        const onclick = a.getAttribute('onclick') || '';
+                        const urlMatch = onclick.match(/https?:\/\/[^\s"']+/);
+                        if (urlMatch) { link = urlMatch[0]; break; }
+                    }
 
-          let link = '';
-          const anchors = row.querySelectorAll('a');
-          for (const a of Array.from(anchors)) {
-            const href = a.href || a.getAttribute('data-href') || '';
-            if (href && !href.startsWith('javascript') && href !== window.location.href) {
-              link = href;
-              break;
+                    if (!link) {
+                        const urlMatch = row.innerHTML.match(/https?:\/\/[^\s"'<]+/);
+                        if (urlMatch) link = urlMatch[0];
+                    }
+
+                    if (!link) continue;
+
+                    const cells = Array.from(row.querySelectorAll('td'));
+                    let subject = 'Class';
+                    for (const cell of cells) {
+                        const t = (cell.textContent || '').trim().replace(/\s+/g, ' ');
+                        if (t.length > subject.length && !/[AP]M/.test(t) && !/^\d+$/.test(t)) {
+                            subject = t;
+                        }
+                    }
+
+                    list.push({
+                        subject: subject.substring(0, 80),
+                        startTime: timeMatch[1].trim(),
+                        endTime: timeMatch[2].trim(),
+                        link,
+                        day: 'today',
+                    });
+                }
+                return list;
+            });
+
+            if (results && results.length > 0) {
+                allClasses.push(...results);
             }
-          }
+        } catch (_err) { /* silent frame fail */ }
+    }
 
-          if (!link) {
-            const urlMatch = row.innerHTML.match(/https?:\/\/[^\s"'<]+/);
-            if (urlMatch) link = urlMatch[0];
-          }
-
-          if (!link) continue;
-
-          const cells = Array.from(row.querySelectorAll('td'));
-          let subject = 'Class';
-          for (const cell of cells) {
-            const t = (cell.textContent || '').trim().replace(/\s+/g, ' ');
-            if (t.length > subject.length && !/[AP]M/.test(t) && !/^\d+$/.test(t)) {
-              subject = t;
-            }
-          }
-
-          results.push({
-            subject: subject.substring(0, 80),
-            startTime: timeMatch[1].trim(),
-            endTime: timeMatch[2].trim(),
-            link,
-            day: 'today',
-          });
-        }
-        return results;
-      });
-
-      if (classes.length === 0) {
-        throw new Error('No classes found in current view. Retrying detection...');
-      }
-
-      this.logger.success(category, `Detected ${classes.length} classes.`);
-      return classes;
-    }, {
-      maxAttempts: 3,
-      category,
-      initialDelayMs: 3000,
-    });
+    const unique = allClasses.filter((cls, i, self) =>
+        i === self.findIndex(c => c.startTime === cls.startTime && c.subject === cls.subject)
+    );
+    
+    if (unique.length === 0) {
+        this.logger.warn(category, 'No classes found in any frame.');
+    } else {
+        this.logger.success(category, `Scraped ${unique.length} unique class(es).`);
+    }
+    
+    return unique;
   }
 }
