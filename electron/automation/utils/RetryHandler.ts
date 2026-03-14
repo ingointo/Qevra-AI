@@ -33,7 +33,7 @@ export class RetryHandler {
     customOptions?: Partial<RetryOptions>
   ): Promise<T> {
     const options = { ...DEFAULT_RETRY_OPTIONS, ...customOptions };
-    let lastError: any;
+    let lastError: unknown;
 
     for (let attempt = 1; attempt <= options.maxAttempts; attempt++) {
       try {

@@ -16,7 +16,7 @@ export class TeamsAutomator {
 
   public async joinMeeting(page: Page, url: string, studentId: string): Promise<void> {
     const category = 'TEAMS_JOIN';
-    let transformedUrl = this.transformTeamsUrl(url);
+    const transformedUrl = this.transformTeamsUrl(url);
     
     await this.navigation.goto(page, transformedUrl);
     

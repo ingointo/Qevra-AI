@@ -126,7 +126,7 @@ export class PortalAutomator extends BaseAutomator {
     }
   }
 
-  private async waitUntilEnd(page: any, cls: ClassSchedule) {
+  private async waitUntilEnd(page: import('playwright-core').Page, cls: ClassSchedule) {
     const end = this.parseTime(cls.endTime);
     while (Date.now() < end.getTime() && this.isRunning) {
         const remaining = end.getTime() - Date.now();

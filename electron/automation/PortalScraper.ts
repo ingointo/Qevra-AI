@@ -51,19 +51,27 @@ export class PortalScraper {
     await this.retryHandler.retry(async () => {
       const dismissed = await page.evaluate(() => {
         try {
+          const win = window as unknown as { 
+            jQuery?: (selector: string) => { modal: (cmd: string) => void };
+            $: (selector: string) => { modal: (cmd: string) => void };
+            bootstrap?: { Modal?: { getInstance: (el: Element) => { hide: () => void } | null } }
+          };
+
           // Bootstrap 3/4 jQuery API
-          const $ = (window as any).jQuery || (window as any).$;
+          const $ = win.jQuery || win.$;
           if ($) {
             $('.modal').modal('hide');
-            $('body').removeClass('modal-open');
-            $('.modal-backdrop').remove();
+            const body = document.body;
+            body.classList.remove('modal-open');
+            const backdrops = document.querySelectorAll('.modal-backdrop');
+            backdrops.forEach(b => b.remove());
             return 'jquery';
           }
 
           // Bootstrap 5 native API
           const modals = Array.from(document.querySelectorAll('.modal.show, .modal[style*="display: block"]'));
           for (const m of modals) {
-            const bsModal = (window as any).bootstrap?.Modal?.getInstance(m);
+            const bsModal = win.bootstrap?.Modal?.getInstance(m);
             if (bsModal) bsModal.hide();
           }
 
@@ -103,7 +111,7 @@ export class PortalScraper {
 
       const classes = await page.evaluate(() => {
         const rows = Array.from(document.querySelectorAll('tr'));
-        const results: any[] = [];
+        const results: ClassSchedule[] = [];
 
         for (const row of rows) {
           const text = row.textContent || '';

@@ -31,8 +31,8 @@ export class NavigationHelper {
         });
 
         this.logger.success(category, `Successfully reached: ${url}`);
-      } catch (error: any) {
-        if (error.message.includes('net::ERR_ABORTED')) {
+      } catch (error: unknown) {
+        if (error instanceof Error && error.message.includes('net::ERR_ABORTED')) {
           this.logger.warn(category, `Navigation aborted for ${url}, likely a redirect or background load.`);
           return;
         }

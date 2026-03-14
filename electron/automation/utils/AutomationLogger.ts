@@ -15,7 +15,7 @@ export class AutomationLogger {
     this.onLog = onLog;
   }
 
-  public log(level: LogLevel, category: string, message: string, detail?: any) {
+  public log(level: LogLevel, category: string, message: string, detail?: unknown) {
     const timestamp = new Date().toLocaleTimeString();
     const formattedMessage = `[${timestamp}] [${level}] [${category}] ${message}`;
     
@@ -39,19 +39,19 @@ export class AutomationLogger {
     }
   }
 
-  public info(category: string, message: string, detail?: any) {
+  public info(category: string, message: string, detail?: unknown) {
     this.log(LogLevel.INFO, category, message, detail);
   }
 
-  public warn(category: string, message: string, detail?: any) {
+  public warn(category: string, message: string, detail?: unknown) {
     this.log(LogLevel.WARN, category, message, detail);
   }
 
-  public error(category: string, message: string, detail?: any) {
+  public error(category: string, message: string, detail?: unknown) {
     this.log(LogLevel.ERROR, category, message, detail);
   }
 
-  public retry(category: string, message: string, attempt: number, maxAttempts: number, error?: any) {
+  public retry(category: string, message: string, attempt: number, maxAttempts: number, error?: unknown) {
     this.log(LogLevel.RETRY, category, `Attempt ${attempt}/${maxAttempts}: ${message}`, error);
   }
 
