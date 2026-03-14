@@ -117,7 +117,7 @@ export class PortalScraper {
         try {
             const results = await frame.evaluate(() => {
                 const rows = Array.from(document.querySelectorAll('tr'));
-                const list: any[] = [];
+                const list: Array<{ subject: string; startTime: string; endTime: string; link: string; day: 'today' | 'tomorrow' }> = [];
                 for (const row of rows) {
                     const text = (row.textContent || '').trim();
                     if (/cancel/i.test(text) || text.length < 10) continue;

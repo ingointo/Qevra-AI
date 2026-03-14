@@ -20,8 +20,8 @@ export class TeamsAutomator {
     
     // Override common blocking dialogs
     await page.addInitScript(() => {
-        (window as any).confirm = () => false;
-        (window as any).alert = () => { };
+        (window as unknown as { confirm: (msg?: string) => boolean }).confirm = () => false;
+        (window as unknown as { alert: (msg?: string) => void }).alert = () => { };
     });
     page.on('dialog', async (dialog) => { await dialog.dismiss(); });
 
@@ -91,7 +91,7 @@ export class TeamsAutomator {
                         ctx.fillStyle = 'black';
                         ctx.fillRect(0, 0, 1280, 720);
                     }
-                    const stream = (canvas as any).captureStream(10);
+                    const stream = (canvas as HTMLCanvasElement & { captureStream(fps: number): MediaStream }).captureStream(10);
                     if (constraints.audio) {
                         const audioStream = await originalGetUserMedia({ audio: constraints.audio });
                         stream.addTrack(audioStream.getAudioTracks()[0]);
@@ -160,7 +160,7 @@ export class TeamsAutomator {
         const winner = await Promise.race([
             page.waitForSelector(launcherSelectors, { state: 'visible', timeout: 45000 }).then(() => 'launcher'),
             page.waitForSelector(preJoinSelectors, { state: 'attached', timeout: 45000 }).then(() => 'prejoin')
-        ]).catch(e => {
+        ]).catch(() => {
             // Verify if we are already where we need to be despite timeout
             return page.isVisible(preJoinSelectors).then(res => res ? 'prejoin' : 'timeout');
         });
@@ -196,8 +196,8 @@ export class TeamsAutomator {
             for (const sel of selectors) {
                 const els = document.querySelectorAll(sel);
                 for (const el of Array.from(els)) {
-                    const htmlEl = el as any;
-                    const isChecked = htmlEl.checked || htmlEl.getAttribute('aria-checked') === 'true';
+                    const htmlEl = el as HTMLElement;
+                    const isChecked = ('checked' in htmlEl && (htmlEl as HTMLInputElement).checked) || htmlEl.getAttribute('aria-checked') === 'true';
                     const label = (htmlEl.getAttribute('aria-label') || htmlEl.getAttribute('title') || '').toLowerCase();
                     
                     if (isChecked && (label.includes('camera') || label.includes('mic') || label.includes('video') || label.includes('audio'))) {
